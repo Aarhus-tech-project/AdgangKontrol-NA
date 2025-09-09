@@ -3,6 +3,7 @@
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include <mqtt/async_client.h>
 #include <mysql_connection.h>
@@ -31,6 +32,11 @@ std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statemen
     auto userAccessRes = statement->executeQuery(userAccessQuery);
     userAccessRes->next();
     std::string usersWithAccess = userAccessRes->getString("allowed_user_ids");
+    char eraseChars[] = "[]";
+    for (unsigned int i = 0; i < strlen(eraseChars); ++i)
+    {
+        usersWithAccess.erase(std::remove(usersWithAccess.begin(), usersWithAccess.end(), eraseChars[i]), usersWithAccess.end());
+    }
     std::stringstream userStringStream(usersWithAccess);
     return userStringStream;
 }
@@ -137,15 +143,19 @@ public:
                     std::string tokenString;
                     while (std::getline(userStringStream, tokenString, ',')) {
                         std::cout << "tokenString: " << tokenString << '\n';
-                        if (tokenString == ('[' + userId + ']')) {
+                        if (tokenString == userId) {
                             std::cout << "User has access to door\n";
                             accessGranted = true;
                             accessResult = "granted";
                             break;
                         }
+                        if (accessGranted) {
+                            break;
+                        }
                     }
                     if (accessGranted == false) {
                         std::cout << "User does not have access to door\n";
+                        break;
                     }
                 }
                 else {
