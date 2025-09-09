@@ -26,7 +26,7 @@ std::string methodColumn;
 std::string accessIdentifier;   // The actual UID or PIN to be written in the databse
 
 
-std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statement) {
+static std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statement) {
     std::string userAccessQuery =
         "SELECT allowed_user_ids FROM doors where id = " + doorId;
     auto userAccessRes = statement->executeQuery(userAccessQuery);
@@ -109,7 +109,7 @@ public:
                 std::string tokenString;
                 while (std::getline(userStringStream, tokenString, ',')) {
                     std::cout << "tokenString: " << tokenString << '\n';
-                    if (tokenString == ('[' + userId + ']')) {
+                    if (tokenString == userId) {
                         std::cout << "User has access to door\n";
                         accessGranted = true;
                         accessResult = "granted";
@@ -162,6 +162,9 @@ public:
                     std::cout << "Pin not recognized\n";
                     userId = "0";
                     accessResult = "denied";
+                }
+                if (accessGranted) {
+                    break;
                 }
             }
             if (!accessGranted) {
