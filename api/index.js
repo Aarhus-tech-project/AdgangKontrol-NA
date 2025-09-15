@@ -12,6 +12,7 @@ const getEnvOrThrow = (key) => { if (!process.env[key]) throw new Error(`Missing
 
 const PORT = process.env.PORT || 3000;
 
+//database connection pool
 const gatekeeperDb = await mysql.createPool({
   host: getEnvOrThrow('DB_HOST'),
   user: getEnvOrThrow('DB_USER'),
@@ -20,18 +21,30 @@ const gatekeeperDb = await mysql.createPool({
   waitForConnections: true,
   connectionLimit: 5,});
 
+//create web server
 const app = express();
 
+//Frontend allowed to call API
 const allowedOrigins = (process.env.ORIGINS ? process.env.ORIGINS.split(',').map(s => s.trim()).filter(Boolean) : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://172.31.0.137:5173']);
 
+// Allow requests from specific frontend origins
 app.use(cors({ origin: allowedOrigins, credentials: false }));
+
+// Parse JSON request bodies
 app.use(express.json());
+
+// Serve static files from /public (e.g. health page)
 app.use(express.static('public')); 
+
+// Log incoming request
 app.use((req, _res, next) => { console.log(req.method, req.url); next(); });
+
+// Health check endpoints
 app.get('/api/admin/health', (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });});
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+// List up to 100 users for admin UI
 app.get('/api/admin/users', async (_req, res) => {
 const [rows] = await gatekeeperDb.query(
     'SELECT id, full_name, active, current_pin_id, created_at FROM users ORDER BY id DESC LIMIT 100;'
@@ -39,24 +52,46 @@ const [rows] = await gatekeeperDb.query(
   res.json(rows);
 });
 
+// Create a new user
 app.post('/api/admin/users', async (req, res) => {
+    // Extract full_name and active from request body.
+   // If active is not given, default to 1
   const { full_name, active = 1 } = req.body || {};
+
+   // Validate: full_name must exist and be a string.
+   // If not, return 400 Bad Request with an error message
   if (!full_name || typeof full_name !== 'string') {
     return res.status(400).json({ error: 'full_name_required' });
   }
+
+    // Insert the new user into the database.
+    // Use parameterized query ? to prevent SQL injection.
+    // Trim spaces from name, and store active.
   const [result] = await gatekeeperDb.query(
     'INSERT INTO users (full_name, active) VALUES (?, ?);',
     [full_name.trim(), active ? 1 : 0]
   );
+
+    // Query the database again to fetch the newly created user
+    // by its auto generated ID result.insertId.
   const [rows] = await gatekeeperDb.query(
     'SELECT id, full_name, active, current_pin_id, created_at FROM users WHERE id=?;',
     [result.insertId]
   );
+  
+
+  // Respond with 201 Created and return the new user as JSON.
   res.status(201).json(rows[0]);
 });
 
-app.patch('/api/admin/users/:id', async (req, res) => { const id = Number(req.params.id); 
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_id' });
+// Update an existing user (partial update: only fields sent are changed)
+app.patch('/api/admin/users/:id', async (req, res) => {
+    // Convert :id from string to number
+  const id = Number(req.params.id); 
+  // Validate id is an integer
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'bad_id' });
+  }
   const setParts = [];
   const params = [];
   if (typeof req.body.full_name === 'string') { setParts.push('full_name=?'); params.push(req.body.full_name.trim()); }
