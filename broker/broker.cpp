@@ -115,9 +115,9 @@ public:
                         accessResult = "granted";
                         break;
                     }
+                    accessGranted = false;
+                    accessResult = "denied";
                 }
-                accessGranted = true;
-                accessResult = "granted";
             }
         }
         else if (message->get_topic() == KEY_TOPIC) {
