@@ -39,7 +39,6 @@ char pswd[] = SECRET_NETPSWD;
 // -------------------------------------------------------------------- MQTT
 
 MqttClient mqttClient(wifiClient);
-const char serverSite[] = "172.31.0.137";
 const char cardTopic[] = CARD_INPUT_TOPIC;
 const char keypadTopic[] = KEY_INPUT_TOPIC;
 const long subInterval = SUB_INTERVAL;
@@ -356,6 +355,10 @@ void connectWifi() {
     delay(2500);
     
   }
+  delay(2500);
+  while (WiFi.localIP() == INADDR_NONE) {
+    delay(100);
+  }
 
   arduino::String localIp = WiFi.localIP().toString();
   arduino::String errorIp = "0.0.0.0";
@@ -363,9 +366,9 @@ void connectWifi() {
   while(localIp == errorIp) {
     Serial.print("\nErroneous IP: ");
     Serial.println(localIp);
-    delay(2500);
     WiFi.begin(ssid, pswd);
-    delay(1000);
+    delay(3000);
+    Serial.println(WiFi.status());
     localIp = WiFi.localIP().toString();
   }
 
@@ -395,7 +398,7 @@ void connectRFIDShield() {
 void connectMQTT() {
   Serial.println("Trying to connect to MQTT broker");
   while (!mqttClient.connected()) {
-    if (!mqttClient.connect(serverSite)) {
+    if (!mqttClient.connect(SERVER_SITE)) {
       Serial.println("Mqtt connection failed.");
       Serial.println("Retrying in 3 seconds..");
     }
