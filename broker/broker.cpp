@@ -94,11 +94,11 @@ public:
             std::stringstream userStringStream = getDoorUserAccess(doorId, statement);
 
             std::string getUid =
-                "SELECT uid, user_id FROM rfid_cards WHERE uid = '" + identification + "'";
+                "SELECT uid, user_id FROM rfid_cards WHERE uid = '" + identification + "' AND active = 1";
 
             auto res = statement->executeQuery(getUid);
             if (!res->next()) {
-                std::cout << "UID not recognized" << '\n';
+                std::cout << "UID not recognized or inactive" << '\n';
                 accessGranted = false;
                 accessResult = "denied";
             }
@@ -159,7 +159,7 @@ public:
                     }
                 }
                 else {
-                    std::cout << "Pin not recognized\n";
+                    std::cout << "Pin not recognized or inactive\n";
                     userId = "0";
                     accessResult = "denied";
                 }
