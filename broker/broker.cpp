@@ -20,10 +20,11 @@ const int TIMEOUT = 10000;
 bool messageReceived = false;
 bool accessGranted = false;
 
-std::string accessMethod;
-std::string accessResult;
-std::string methodColumn;
+std::string accessMethod;       // Method of access. Inserted into events
+std::string accessResult;       // Denied or granted
+std::string methodColumn;       // Column to be inserted into in events
 std::string accessIdentifier;   // The actual UID or PIN to be written in the databse
+std::string subscriberDoorId;
 
 
 static std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statement) {
@@ -72,6 +73,7 @@ public:
             }
             else if (splitCounter == 1) {
                 doorId = streamToken;
+                subscriberDoorId = doorId;
                 splitCounter++;
             }
         }
@@ -235,13 +237,13 @@ int main(int argc, char* argv[])
                 std::cout << "\nAccess Logic:\n";
                 if (accessGranted) {
                     std::string reqMess = "granted";
-                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_GRANTED_TOPIC, reqMess, QOS, false);
+                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_GRANTED_TOPIC + subscriberDoorId, reqMess, QOS, false);
                     pubClient.publish(pubMessage)->wait();
                     std::cout << "Granted\n";
                 }
                 else {
                     std::string reqMess = "denied";
-                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_DENIED_TOPIC, reqMess, QOS, false);
+                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_DENIED_TOPIC + subscriberDoorId, reqMess, QOS, false);
                     pubClient.publish(pubMessage)->wait();
                     std::cout << "Denied\n";
                 }

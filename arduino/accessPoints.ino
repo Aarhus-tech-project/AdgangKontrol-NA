@@ -6,7 +6,11 @@
 #include "arduinoAccessData.h"
 #include <Adafruit_SH110X.h>
 
-const int doorId = 1;
+// const int doorId = 1;
+// const char mqttId[] = "arduino1";
+
+const int doorId = 4;
+const char mqttId[] = "arduino2";
 
 // -------------------------------------------------------------------- DISPLAY
 
@@ -61,9 +65,9 @@ void setup() {
   connectWifi();
   connectMQTT();
 
-  mqttClient.subscribe(ACCESS_GRANTED_TOPIC);
-  mqttClient.subscribe(ACCESS_DENIED_TOPIC);
-  mqttClient.setId("arduino");
+  mqttClient.subscribe(ACCESS_GRANTED_TOPIC + String(doorId));
+  mqttClient.subscribe(ACCESS_DENIED_TOPIC + String(doorId));
+  mqttClient.setId(mqttId);
 }
 
 // -------------------------------------------------------------------- LOOP
@@ -130,13 +134,13 @@ void sendMqtt(char *passCode) {
 }
 
 void accessVisuals(arduino::String topic) {
-  if (topic == ACCESS_GRANTED_TOPIC) {
+  if (topic == ACCESS_GRANTED_TOPIC + String(doorId)) {
     Serial.println("OPEN");
     displaySuccess();
     openLight();
     display.clearDisplay();
     display.display();
-  } else if (topic == ACCESS_DENIED_TOPIC) {
+  } else if (topic == ACCESS_DENIED_TOPIC + String(doorId)) {
     Serial.println("DENIED");
     displayWrongCode();
     deniedLight();
@@ -400,9 +404,9 @@ void connectMQTT() {
   while (!mqttClient.connected()) {
     if (!mqttClient.connect(SERVER_SITE)) {
       Serial.println("Mqtt connection failed.");
-      Serial.println("Retrying in 3 seconds..");
+      Serial.println("Retrying..");
     }
-    delay(3000);
+    delay(1000);
   }
 
   Serial.println("Connected to MQTT broker\n");
