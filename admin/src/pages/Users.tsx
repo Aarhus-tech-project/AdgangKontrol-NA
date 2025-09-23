@@ -41,46 +41,73 @@ export default function Users() {
   const qc = useQueryClient();
   const toast = useToast();
 
-  // Search box + "add user" form
+  // Search + create form
   const [searchQuery, setSearchQuery] = useState("");
   const [createFullName, setCreateFullName] = useState("");
   const [createActive, setCreateActive] = useState(true);
 
-  // Inline edit state for the row currently being edited
+  // PIN fields (optional)
+  const [createPin, setCreatePin] = useState("");
+  const [createPin2, setCreatePin2] = useState("");
+
+  // Inline edit
   const [editId, setEditId] = useState<number | null>(null);
   const [editFullName, setEditFullName] = useState("");
   const [editActive, setEditActive] = useState<0 | 1>(1);
 
-  // Pull the latest users from the server
+  // Load users
   const { data = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ["users"],
     queryFn: async () => (await api.get<User[]>("/users")).data,
   });
 
-  // Lightweight client-side filter (name only)
+  // Filter
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return data;
     return data.filter((u) => u.full_name.toLowerCase().includes(q));
   }, [data, searchQuery]);
 
-  // Create a new user, then refresh the list
+  // Helpers
+  const pinDigits = (s: string) => s.replace(/\D/g, "");
+  const pinIsProvided = createPin.trim().length > 0 || createPin2.trim().length > 0;
+  const pinFormatBad = createPin.trim().length > 0 && !/^\d{4,10}$/.test(createPin.trim());
+  const pinMismatch = createPin.trim() !== createPin2.trim();
+  const pinInvalid = pinIsProvided && (pinFormatBad || pinMismatch);
+
+  // Create user
   const createUser = useMutation({
-    mutationFn: async () =>
-      (await api.post<User>("/users", {
+    mutationFn: async () => {
+      const payload: any = {
         full_name: createFullName.trim(),
         active: createActive ? 1 : 0,
-      })).data,
+      };
+      if (!pinInvalid && createPin.trim()) {
+        payload.pin = createPin.trim();
+      }
+      return (await api.post<User>("/users", payload)).data;
+    },
     onSuccess: () => {
       setCreateFullName("");
       setCreateActive(true);
+      setCreatePin("");
+      setCreatePin2("");
       qc.invalidateQueries({ queryKey: ["users"] });
       toast({ status: "success", title: "User created" });
     },
-    onError: () => toast({ status: "error", title: "Failed to create user" }),
+    onError: (e: any) => {
+      const code = e?.response?.data?.error;
+      const msg =
+        code === "pin_in_use"
+          ? "That PIN is already in use by an active user."
+          : code === "bad_pin"
+          ? "PIN must be 4–10 digits."
+          : "Failed to create user";
+      toast({ status: "error", title: msg });
+    },
   });
 
-  // Save edits for the selected row, then refresh
+  // Update user
   const updateUser = useMutation({
     mutationFn: async (id: number) =>
       (await api.patch<User>(`/users/${id}`, {
@@ -95,7 +122,7 @@ export default function Users() {
     onError: () => toast({ status: "error", title: "Failed to update user" }),
   });
 
-  // Remove a user, then refresh
+  // Delete user
   const deleteUser = useMutation({
     mutationFn: async (id: number) => (await api.delete(`/users/${id}`)).data,
     onSuccess: () => {
@@ -105,7 +132,6 @@ export default function Users() {
     onError: () => toast({ status: "error", title: "Failed to delete user" }),
   });
 
-  // Put a row into "edit mode"
   function startEdit(u: User) {
     setEditId(u.id);
     setEditFullName(u.full_name);
@@ -114,7 +140,7 @@ export default function Users() {
 
   return (
     <Box>
-      {/* Header: title, manual refresh, search */}
+      {/* Header */}
       <HStack mb={4} align="center">
         <Heading size="md">Users</Heading>
         <IconButton
@@ -133,7 +159,7 @@ export default function Users() {
         />
       </HStack>
 
-      {/* Add user row */}
+      {/* Create row */}
       <HStack mb={6} spacing={3} align="center" flexWrap="wrap">
         <Input
           placeholder="Full name"
@@ -148,18 +174,51 @@ export default function Users() {
             onChange={(e) => setCreateActive(e.target.checked)}
           />
         </HStack>
+
+        {/* PIN + confirm (optional) */}
+        <Input
+          type="password"
+          inputMode="numeric"
+          pattern="\d*"
+          placeholder="PIN (optional, 4–10 digits)"
+          value={createPin}
+          onChange={(e) => setCreatePin(pinDigits(e.target.value))}
+          maxW="220px"
+        />
+        <Input
+          type="password"
+          inputMode="numeric"
+          pattern="\d*"
+          placeholder="Confirm PIN"
+          value={createPin2}
+          onChange={(e) => setCreatePin2(pinDigits(e.target.value))}
+          maxW="220px"
+        />
+
         <Button
           leftIcon={<AddIcon />}
           colorScheme="blue"
-          onClick={() => createUser.mutate()}
-          isDisabled={!createFullName.trim()}
+          onClick={() => {
+            if (pinInvalid) {
+              if (pinFormatBad) {
+                toast({ status: "error", title: "PIN must be 4–10 digits" });
+                return;
+              }
+              if (pinMismatch) {
+                toast({ status: "error", title: "PINs do not match" });
+                return;
+              }
+            }
+            createUser.mutate();
+          }}
+          isDisabled={!createFullName.trim() || pinInvalid}
           isLoading={createUser.isPending}
         >
           Add user
         </Button>
       </HStack>
 
-      {/* Table: loading → empty → rows */}
+      {/* Table */}
       <Table variant="simple" size="sm">
         <Thead>
           <Tr>
