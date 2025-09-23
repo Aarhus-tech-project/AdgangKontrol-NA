@@ -20,13 +20,14 @@ const int TIMEOUT = 10000;
 bool messageReceived = false;
 bool accessGranted = false;
 
-std::string accessMethod;
-std::string accessResult;
-std::string methodColumn;
+std::string accessMethod;       // Method of access. Inserted into events
+std::string accessResult;       // Denied or granted
+std::string methodColumn;       // Column to be inserted into in events
 std::string accessIdentifier;   // The actual UID or PIN to be written in the databse
+std::string subscriberDoorId;
 
 
-std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statement) {
+static std::stringstream getDoorUserAccess(std::string doorId, sql::Statement *statement) {
     std::string userAccessQuery =
         "SELECT allowed_user_ids FROM doors where id = " + doorId;
     auto userAccessRes = statement->executeQuery(userAccessQuery);
@@ -72,6 +73,7 @@ public:
             }
             else if (splitCounter == 1) {
                 doorId = streamToken;
+                subscriberDoorId = doorId;
                 splitCounter++;
             }
         }
@@ -94,11 +96,11 @@ public:
             std::stringstream userStringStream = getDoorUserAccess(doorId, statement);
 
             std::string getUid =
-                "SELECT uid, user_id FROM rfid_cards WHERE uid = '" + identification + "'";
+                "SELECT uid, user_id FROM rfid_cards WHERE uid = '" + identification + "' AND active = 1";
 
             auto res = statement->executeQuery(getUid);
             if (!res->next()) {
-                std::cout << "UID not recognized" << '\n';
+                std::cout << "UID not recognized or inactive" << '\n';
                 accessGranted = false;
                 accessResult = "denied";
             }
@@ -109,15 +111,15 @@ public:
                 std::string tokenString;
                 while (std::getline(userStringStream, tokenString, ',')) {
                     std::cout << "tokenString: " << tokenString << '\n';
-                    if (tokenString == ('[' + userId + ']')) {
+                    if (tokenString == userId) {
                         std::cout << "User has access to door\n";
                         accessGranted = true;
                         accessResult = "granted";
                         break;
                     }
+                    accessGranted = false;
+                    accessResult = "denied";
                 }
-                accessGranted = true;
-                accessResult = "granted";
             }
         }
         else if (message->get_topic() == KEY_TOPIC) {
@@ -159,9 +161,12 @@ public:
                     }
                 }
                 else {
-                    std::cout << "Pin not recognized\n";
+                    std::cout << "Pin not recognized or inactive\n";
                     userId = "0";
                     accessResult = "denied";
+                }
+                if (accessGranted) {
+                    break;
                 }
             }
             if (!accessGranted) {
@@ -232,13 +237,13 @@ int main(int argc, char* argv[])
                 std::cout << "\nAccess Logic:\n";
                 if (accessGranted) {
                     std::string reqMess = "granted";
-                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_GRANTED_TOPIC, reqMess, QOS, false);
+                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_GRANTED_TOPIC + subscriberDoorId, reqMess, QOS, false);
                     pubClient.publish(pubMessage)->wait();
                     std::cout << "Granted\n";
                 }
                 else {
                     std::string reqMess = "denied";
-                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_DENIED_TOPIC, reqMess, QOS, false);
+                    mqtt::message_ptr pubMessage = mqtt::make_message(ACCESS_DENIED_TOPIC + subscriberDoorId, reqMess, QOS, false);
                     pubClient.publish(pubMessage)->wait();
                     std::cout << "Denied\n";
                 }

@@ -6,7 +6,11 @@
 #include "arduinoAccessData.h"
 #include <Adafruit_SH110X.h>
 
-const int doorId = 1;
+// const int doorId = 1;
+// const char mqttId[] = "arduino1";
+
+const int doorId = 4;
+const char mqttId[] = "arduino2";
 
 // -------------------------------------------------------------------- DISPLAY
 
@@ -39,7 +43,6 @@ char pswd[] = SECRET_NETPSWD;
 // -------------------------------------------------------------------- MQTT
 
 MqttClient mqttClient(wifiClient);
-const char serverSite[] = "172.31.0.137";
 const char cardTopic[] = CARD_INPUT_TOPIC;
 const char keypadTopic[] = KEY_INPUT_TOPIC;
 const long subInterval = SUB_INTERVAL;
@@ -62,9 +65,9 @@ void setup() {
   connectWifi();
   connectMQTT();
 
-  mqttClient.subscribe(ACCESS_GRANTED_TOPIC);
-  mqttClient.subscribe(ACCESS_DENIED_TOPIC);
-  mqttClient.setId("arduino");
+  mqttClient.subscribe(ACCESS_GRANTED_TOPIC + String(doorId));
+  mqttClient.subscribe(ACCESS_DENIED_TOPIC + String(doorId));
+  mqttClient.setId(mqttId);
 }
 
 // -------------------------------------------------------------------- LOOP
@@ -131,13 +134,13 @@ void sendMqtt(char *passCode) {
 }
 
 void accessVisuals(arduino::String topic) {
-  if (topic == ACCESS_GRANTED_TOPIC) {
+  if (topic == ACCESS_GRANTED_TOPIC + String(doorId)) {
     Serial.println("OPEN");
     displaySuccess();
     openLight();
     display.clearDisplay();
     display.display();
-  } else if (topic == ACCESS_DENIED_TOPIC) {
+  } else if (topic == ACCESS_DENIED_TOPIC + String(doorId)) {
     Serial.println("DENIED");
     displayWrongCode();
     deniedLight();
@@ -356,6 +359,10 @@ void connectWifi() {
     delay(2500);
     
   }
+  delay(2500);
+  while (WiFi.localIP() == INADDR_NONE) {
+    delay(100);
+  }
 
   arduino::String localIp = WiFi.localIP().toString();
   arduino::String errorIp = "0.0.0.0";
@@ -363,9 +370,9 @@ void connectWifi() {
   while(localIp == errorIp) {
     Serial.print("\nErroneous IP: ");
     Serial.println(localIp);
-    delay(2500);
     WiFi.begin(ssid, pswd);
-    delay(1000);
+    delay(3000);
+    Serial.println(WiFi.status());
     localIp = WiFi.localIP().toString();
   }
 
@@ -395,11 +402,11 @@ void connectRFIDShield() {
 void connectMQTT() {
   Serial.println("Trying to connect to MQTT broker");
   while (!mqttClient.connected()) {
-    if (!mqttClient.connect(serverSite)) {
+    if (!mqttClient.connect(SERVER_SITE)) {
       Serial.println("Mqtt connection failed.");
-      Serial.println("Retrying in 3 seconds..");
+      Serial.println("Retrying..");
     }
-    delay(3000);
+    delay(1000);
   }
 
   Serial.println("Connected to MQTT broker\n");

@@ -13,6 +13,7 @@ const getEnvOrThrow = (key) => {
 };
 const PORT = process.env.PORT || 3000;
 
+//database connection pool
 const gatekeeperDb = await mysql.createPool({
   host: getEnvOrThrow('DB_HOST'),
   user: getEnvOrThrow('DB_USER'),
@@ -22,24 +23,32 @@ const gatekeeperDb = await mysql.createPool({
   connectionLimit: 5,
 });
 
+//create web server
 /*  App  */
 const app = express();
-const allowedOrigins = (process.env.ORIGINS
-  ? process.env.ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
-  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://172.31.0.137:5173']);
 
+//Frontend allowed to call API
+const allowedOrigins = (process.env.ORIGINS ? process.env.ORIGINS.split(',').map(s => s.trim()).filter(Boolean) : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://172.31.0.137:5173']);
+
+// Allow requests from specific frontend origins
 app.use(cors({ origin: allowedOrigins, credentials: false }));
+
+// Parse JSON request bodies
 app.use(express.json());
-app.use(express.static('public'));
+
+// Serve static files from /public (e.g. health page)
+app.use(express.static('public')); 
+
+// Log incoming request
 app.use((req, _res, next) => { console.log(req.method, req.url); next(); });
 
-/* Health  */
+// Health check endpoints
 app.get('/api/admin/health', (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-/* Users  */
+// List up to 100 users for admin UI
 app.get('/api/admin/users', async (_req, res) => {
   const [rows] = await gatekeeperDb.query(
     'SELECT id, full_name, active, current_pin_id, created_at FROM users ORDER BY id DESC LIMIT 100;'
@@ -47,94 +56,52 @@ app.get('/api/admin/users', async (_req, res) => {
   res.json(rows);
 });
 
-// Create user 
+// Create a new user
 app.post('/api/admin/users', async (req, res) => {
-  const { full_name, active = 1, pin } = req.body || {};
+    // Extract full_name and active from request body.
+   // If active is not given, default to 1
+  const { full_name, active = 1 } = req.body || {};
+
+   // Validate: full_name must exist and be a string.
+   // If not, return 400 Bad Request with an error message
   if (!full_name || typeof full_name !== 'string') {
     return res.status(400).json({ error: 'full_name_required' });
   }
 
-  const validatePin = (p) => {
-    if (p == null || p === '') return true;     
-    if (typeof p !== 'string') return false;
-    return /^\d{4,10}$/.test(p);                 
-  };
-  if (!validatePin(pin)) {
-    return res.status(400).json({ error: 'bad_pin' });
-  }
+    // Insert the new user into the database.
+    // Use parameterized query ? to prevent SQL injection.
+    // Trim spaces from name, and store active.
+  const [result] = await gatekeeperDb.query(
+    'INSERT INTO users (full_name, active) VALUES (?, ?);',
+    [full_name.trim(), active ? 1 : 0]
+  );
 
-  const conn = await gatekeeperDb.getConnection();
-  try {
-    await conn.beginTransaction();
+    // Query the database again to fetch the newly created user
+    // by its auto generated ID result.insertId.
+  const [rows] = await gatekeeperDb.query(
+    'SELECT id, full_name, active, current_pin_id, created_at FROM users WHERE id=?;',
+    [result.insertId]
+  );
+  
 
-    // 1) create user
-    const [insUser] = await conn.query(
-      'INSERT INTO users (full_name, active) VALUES (?, ?);',
-      [full_name.trim(), active ? 1 : 0]
-    );
-    const userId = insUser.insertId;
-
-    if (pin && pin.trim()) {
-      // disallow duplicate active current PINs
-      const [rows] = await conn.query(
-        `SELECT u.id AS user_id, p.pin_hash
-           FROM users u
-           JOIN pins p ON p.id = u.current_pin_id
-          WHERE u.active = 1 AND p.active = 1`
-      );
-      for (const r of rows) {
-        if (bcrypt.compareSync(pin, r.pin_hash)) {
-          throw Object.assign(new Error('duplicate_active_pin'), { code: 'DUP_PIN' });
-        }
-      }
-
-      const pinHash = bcrypt.hashSync(pin, 10);
-      const [insPin] = await conn.query(
-        'INSERT INTO pins (user_id, pin_hash, active) VALUES (?, ?, 1);',
-        [userId, pinHash]
-      );
-      const pinId = insPin.insertId;
-
-      await conn.query('UPDATE users SET current_pin_id=? WHERE id=?;', [pinId, userId]);
-    }
-
-    await conn.commit();
-
-    const [[row]] = await gatekeeperDb.query(
-      'SELECT id, full_name, active, current_pin_id, created_at FROM users WHERE id=?;',
-      [userId]
-    );
-    res.status(201).json(row);
-  } catch (e) {
-    await conn.rollback();
-    if (e.code === 'DUP_PIN') {
-      return res.status(409).json({ error: 'pin_in_use' });
-    }
-    console.error('[users.post] error:', e);
-    res.status(500).json({ error: 'db_error' });
-  } finally {
-    conn.release();
-  }
+  // Respond with 201 Created and return the new user as JSON.
+  res.status(201).json(rows[0]);
 });
 
-// Update user. Cascade cards & current PIN on activate/deactivate.
+// Update an existing user (partial update: only fields sent are changed)
 app.patch('/api/admin/users/:id', async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_id' });
-
-  const setClauses = [];
-  const values = [];
-
-  if (typeof req.body.full_name === 'string') {
-    setClauses.push('full_name=?'); values.push(req.body.full_name.trim());
+    // Convert :id from string to number
+  const id = Number(req.params.id); 
+  // Validate id is an integer
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'bad_id' });
   }
-  if (req.body.active !== undefined) {
-    setClauses.push('active=?'); values.push(req.body.active ? 1 : 0);
-  }
-  if (req.body.current_pin_id !== undefined) {
-    setClauses.push('current_pin_id=?'); values.push(req.body.current_pin_id ?? null);
-  }
-  if (!setClauses.length) return res.status(400).json({ error: 'no_fields' });
+  const setParts = [];
+  const params = [];
+  if (typeof req.body.full_name === 'string') { setParts.push('full_name=?'); params.push(req.body.full_name.trim()); }
+  if (req.body.active !== undefined) { setParts.push('active=?'); params.push(req.body.active ? 1 : 0); }
+  if (req.body.current_pin_id !== undefined) { setParts.push('current_pin_id=?'); params.push(req.body.current_pin_id ?? null); }
+  if (!setParts.length) return res.status(400).json({ error: 'no_fields' });
 
   const isDeactivating = req.body.active === 0 || req.body.active === false;
   const isActivating   = req.body.active === 1 || req.body.active === true;
